@@ -1,30 +1,30 @@
 /*globals define*/
 function process(name,targetNamespace,xmlns,matter){
-    var result = "<process name=\""+name+"\" targetNamespace=\""+targetNamespace+"\" xmlns=\""+xmlns+"\" >" + matter+ "</process>";
+    var result = "<process name=\""+name+"\" targetNamespace=\""+targetNamespace+"\" xmlns=\""+xmlns+"\" >\n\t" + matter+ "\n</process>";
     return result;
 }
 function parterner_link(name,partnerLinkType,myRole,partnerRole){
-    var result = "<partnerLink name=\"" + String(name)+"\" partnerLinkType=\""+partnerLinkType+"\" myRole=\""+myRole+"\" partnerRole=\""+partnerRole+"\"/>\n";
+    var result = "<partnerLink name=\"" + String(name)+"\" partnerLinkType=\""+partnerLinkType+"\" myRole=\""+myRole+"\" partnerRole=\""+partnerRole+"\"/>";
     return result;
 }
 function parterner_links(matter){
-    var result = "<partnerLinks>\n"+matter +"\n</partnerLinks>";
+    var result = "<partnerLinks>\n\t"+matter +"\n</partnerLinks>";
     return result;
 }
 function variables(matter){
-    var result = "<variables>\n"+matter +"\n</variables>";
+    var result = "<variables>\n\t"+matter +"\n</variables>";
     return result;
 }
 function variable(name,messageType){
-    var result = "<variable name=\""+name+"\" messageType=\""+messageType+"\"/>";
+    var result = "<variable name=\""+name+"\" messageType=\""+messageType+"\"/>\n";
     return result;
 }
 function sequence(matter){
-    var result = "<sequence>"+matter+"</sequence>";
+    var result = "<sequence>\n\t"+matter+"\n</sequence>";
     return result;
 }
 function invoke(partnerLink,portType,operation,inputVariable,outputVariable){
-    var result =  "<invoke partnerLink=\""+partnerLink+"\" portType=\""+portType+"\" operation=\""+operation+"\" inputVariable=\""+inputVariable+"\" outputVariable=\""+outputVariable+"\"/>";
+    var result =  "<invoke partnerLink=\""+partnerLink+"\" portType=\""+portType+"\" operation=\""+operation+"\" inputVariable=\""+inputVariable+"\" outputVariable=\""+outputVariable+"\"/>\n";
     return result;
 }
 function recive(partnerLink,portType,operation,variable){
@@ -32,19 +32,19 @@ function recive(partnerLink,portType,operation,variable){
     return result;
 }
 function assign(from ,to ){
-    var result = "<assign><copy><from variable=\""+from +"\"/><to variable=\""+to+"\"/></copy></assign>";
+    var result = "<assign>\n<copy>\n<from variable=\""+from +"\"/>\n<to variable=\""+to+"\"/>\n</copy>\n</assign>\n";
     return result;
 }
 function _switch(matter){
-    var result = "<switch>"+matter+"</switch>";
+    var result = "<switch>\n\t"+matter+"\n</switch>";
     return result;
 }
 function otherwise(matter){
-    var result = "<otherwise>\n"+matter+"\n</otherwise>";
+    var result = "<otherwise>\n\t"+matter+"\n</otherwise>";
     return result;
 }
 function _case(condition,matter){
-    var result = "<case condition=\""+condition+"\">\n" +matter+"\n</case>";
+    var result = "<case condition=\""+condition+"\">\n\t" +matter+"\n</case>";
     return result;
 }
 /*eslint-env node, browser*/
@@ -112,10 +112,110 @@ define([
 
         // Using the coreAPI to make changes.
         const nodeObject = self.activeNode;
+        var plnks ="";
+        var _variable = "";
+        var seq = "";
+        var graph = {};
+        var vis = {};
+        var root;
+        var getVariables = new Set();
         console.log(self.core.getAttribute(nodeObject,"name"));
+        self.loadNodeMap(nodeObject)
+        .then((nodes)=>{
+            const cp = self.core.getChildrenPaths(nodeObject);
+            for(var i = 0 ;i<cp.length;i++){
+                var node = nodes[cp[i]];
+                var metaType = String(self.core.getMetaType(nodes[cp[i]]).data.atr.name);
+                if(!self.core.isConnection(nodes[cp[i]])){
+                    if(metaType.localeCompare("Partner link") == 0){
+                        console.log("Heey")
+                        const name = self.core.getAttribute(node,'name');
+                        const myRole = self.core.getAttribute(node,'name'); 
+                        const partnerLinkType = self.core.getAttribute(node,'name'); 
+                        const partnerRole = self.core.getAttribute(node,'name'); 
+                        plnks += parterner_link(name,partnerLinkType,myRole,partnerRole);
+                    }
+                    if(metaType.localeCompare("Invoke") == 0){
+                        var  inputVariable = self.core.getAttribute(node,"inputVariable");
+                        var  outputVariable = self.core.getAttribute(node,"outputVariable");
+                        getVariables.add(inputVariable);
+                        getVariables.add(outputVariable);
+                    }
+                    if(metaType.localeCompare("Assign") == 0){
+                        var from = self.core.getAttribute(node,"from");
+                        var to = self.core.getAttribute(node,"to");
+                        getVariables.add(from);
+                        getVariables.add(to);
+                    }
+                    if(metaType.localeCompare("Start")== 0){
+                        root = cp[i];
+                    }
+                }else{
+                   // var node = nodes[cp[i]];
+                    if(metaType.localeCompare("connection") == 0){
+                        var x = self.core.getPointerPath(node,'src');
+                        var y = self.core.getPointerPath(node,'dst');
+                        vis[x] = false;
+                        vis[y] = false;
+                        if(!(x in graph)){
+                            graph[x] = [];
+                        }
+                        graph[x].push(y);
+                    }
+                }
+            }
+            function dfs(x){
+                vis[x] = true;
+                //console.log(self.core.getAttribute(nodes[x],'name'));
+                //console.log(vis);
+                //console.log(graph);
+
+                //console.log(graph);
+                graph[x].forEach((child, i) => {
+                    if(!vis[child]){
+                        var currnode = nodes[child]; 
+                        var metaType = String(self.core.getMetaType(currnode).data.atr.name);
+                        console.log(self.core.getAttribute(currnode,'name'));
+                        if(metaType.localeCompare("Invoke")==0){
+                            var inputVariable = self.core.getAttribute(currnode,"inputVariable");
+                            var name = self.core.getAttribute(currnode,"name");
+                            var operation = self.core.getAttribute(currnode,"operation");
+                            var outputVariable = self.core.getAttribute(currnode,"outputVariable");
+                            var partnerLink = self.core.getAttribute(currnode,"partnerLink");
+                            var portType = self.core.getAttribute(currnode,"portType");
+                            seq += invoke(partnerLink,portType,operation,inputVariable,outputVariable);
+                        }
+                        if(metaType.localeCompare("Assign")==0){
+                            var from = self.core.getAttribute(currnode,"from");
+                            var to = self.core.getAttribute(currnode,"to");
+                            seq += assign(from,to);
+                        }
+                        if((child in graph)){
+                            dfs(child);
+                        }else{
+                            vis[child] = true;
+                        }
+                    }
+                });
+            }
+            console.log(typeof(root));
+            console.log("HHHH");
+            dfs(root);
+            console.log("HHHH");
+
+            //console.log(graph);
+            getVariables.forEach((val)=>{
+                _variable += variable(val,"");
+            });
+            plnks = parterner_links(plnks);
+            _variable = variables(_variable);
+            seq = sequence(seq);
+            var code = process(self.core.getAttribute(nodeObject,"name"),"","",plnks+"\n"+_variable+"\n"+seq);
+            console.log(code);
+            console.log("code");
+
+        });
         
-
-
         // This will save the changes. If you don't want to save;
         // exclude self.save and call callback directly from this scope.
         self.save('final updated model.')
