@@ -1,7 +1,10 @@
 /*globals define*/
-function process(name,targetNamespace,xmlns,matter){
-    var result = "<process name=\""+name+"\" targetNamespace=\""+targetNamespace+"\" xmlns=\""+xmlns+"\" >\n\t" + matter+ "\n</process>";
+function process(name,targetNamespace,xmlns,matter,xmlns_var){
+    var result = "<process name=\""+name+"\" targetNamespace=\""+targetNamespace+"\" xmlns=\""+xmlns+"\" "+xmlns_var+">\n\t" + matter+ "\n</process>";
     return result;
+}
+function terminate(){
+    return "<exit/>"
 }
 function parterner_link(name,partnerLinkType,myRole,partnerRole){
     var result = "<partnerLink name=\"" + String(name)+"\" partnerLinkType=\""+partnerLinkType+"\" myRole=\""+myRole+"\" partnerRole=\""+partnerRole+"\"/>";
@@ -27,8 +30,8 @@ function invoke(partnerLink,portType,operation,inputVariable,outputVariable){
     var result =  "<invoke partnerLink=\""+partnerLink+"\" portType=\""+portType+"\" operation=\""+operation+"\" inputVariable=\""+inputVariable+"\" outputVariable=\""+outputVariable+"\"/>\n";
     return result;
 }
-function recive(partnerLink,portType,operation,variable){
-    var result = "<receive partnerLink=\""+partnerLink+"\" portType=\""+portType+"\" operation=\""+operation+"\" variable=\""+variable+"\" />";
+function recive(partnerLink,portType,operation,inputVariable,outputVariable){
+    var result =  "<recive partnerLink=\""+partnerLink+"\" portType=\""+portType+"\" operation=\""+operation+"\" inputVariable=\""+inputVariable+"\" outputVariable=\""+outputVariable+"\"/>\n";
     return result;
 }
 function assign(from ,to ){
@@ -46,6 +49,24 @@ function otherwise(matter){
 function _case(condition,matter){
     var result = "<case condition=\""+condition+"\">\n\t" +matter+"\n</case>";
     return result;
+}
+function start_switch(){
+    return "<switch>\n";
+}
+function end_switch(){
+    return "</switch>";
+}
+function _case_start(condition){
+    return "<case condition=\""+condition+"\">\n\t";
+}
+function _case_close(){
+    return "\n</case>\n";
+}
+function start_otherwise(){
+    return "<otherwise>\n\t";
+}
+function end_otherwise(){
+    return "\n</otherwise>";
 }
 /*eslint-env node, browser*/
 
@@ -117,18 +138,29 @@ define([
         var seq = "";
         var graph = {};
         var vis = {};
+        var sw = 0;
+        var m1 = 0;
+        var switch_vis = {};
+        var dic_switch_vis = {};
+        var dic = {};
         var root;
         var getVariables = new Set();
-        console.log(self.core.getAttribute(nodeObject,"name"));
+        var ldic = { 
+            "one":1,
+            "two":2
+        };
+        //dic["abc"] = ldic;
+        ////console.log(dic);
+        //console.log(self.core.getAttribute(nodeObject,"name"));
         self.loadNodeMap(nodeObject)
         .then((nodes)=>{
             const cp = self.core.getChildrenPaths(nodeObject);
             for(var i = 0 ;i<cp.length;i++){
                 var node = nodes[cp[i]];
                 var metaType = String(self.core.getMetaType(nodes[cp[i]]).data.atr.name);
+               // //console.log(metaType);
                 if(!self.core.isConnection(nodes[cp[i]])){
                     if(metaType.localeCompare("Partner link") == 0){
-                        console.log("Heey")
                         const name = self.core.getAttribute(node,'name');
                         const myRole = self.core.getAttribute(node,'name'); 
                         const partnerLinkType = self.core.getAttribute(node,'name'); 
@@ -136,6 +168,12 @@ define([
                         plnks += parterner_link(name,partnerLinkType,myRole,partnerRole);
                     }
                     if(metaType.localeCompare("Invoke") == 0){
+                        var  inputVariable = self.core.getAttribute(node,"inputVariable");
+                        var  outputVariable = self.core.getAttribute(node,"outputVariable");
+                        getVariables.add(inputVariable);
+                        getVariables.add(outputVariable);
+                    }
+                    if(metaType.localeCompare("Recive") == 0){
                         var  inputVariable = self.core.getAttribute(node,"inputVariable");
                         var  outputVariable = self.core.getAttribute(node,"outputVariable");
                         getVariables.add(inputVariable);
@@ -150,69 +188,220 @@ define([
                     if(metaType.localeCompare("Start")== 0){
                         root = cp[i];
                     }
+                    /*if(metaType.localeCompare("Switch") == 0){
+                        var pins = self.core.getChildrenPaths(node);
+                        pins.forEach(element => {
+                            //console.log(self.core.getAttribute(nodes[element],'name'));
+                        });
+                    }*/
                 }else{
                    // var node = nodes[cp[i]];
                     if(metaType.localeCompare("connection") == 0){
                         var x = self.core.getPointerPath(node,'src');
                         var y = self.core.getPointerPath(node,'dst');
+                        var metaTypeX = String(self.core.getMetaType(nodes[x]).data.atr.name);
+                        var nameX =  String(self.core.getAttribute(nodes[x],"name"));
+                        if(metaTypeX.localeCompare("Pins") == 0){
+                            x = x.slice(0,-2);
+                        }
                         vis[x] = false;
                         vis[y] = false;
+                        switch_vis[x] = 0;
+                        switch_vis[y] = 0;
                         if(!(x in graph)){
                             graph[x] = [];
                         }
                         graph[x].push(y);
+                        if(nameX.localeCompare("Case")==0){
+                            graph[x].reverse();
+                        }
                     }
                 }
             }
-            function dfs(x){
-                vis[x] = true;
-                //console.log(self.core.getAttribute(nodes[x],'name'));
-                //console.log(vis);
-                //console.log(graph);
+            //console.log(graph)
+            function switch_dfs(x,s_vis,who){
+                if(s_vis[x] != 0 && s_vis[x] != who){
+                    s_vis[x] = -1;;
+                    return;
+                }
+                s_vis[x] = who;
+                if(x in graph){
+                    graph[x].forEach((child,i)=>{
+                        if(s_vis[child] == 0){
+                            if((child in graph)){
+                                switch_dfs(child,s_vis,who);
+                            }else{
+                                s_vis[child] = who;
+                            }
+                        }else if(s_vis[child] != who){
+                            s_vis[child] = -1;
+                        }
+                    });
+                }
+            }
+            function mark0(x, s_vis){
+                s_vis[x] = 0;
+                if(x in graph){
+                    graph[x].forEach((child,i)=>{
+                        if(s_vis[child]!=0){
+                            if((child in graph)){
+                                mark0(child,s_vis);
+                            }else{
+                                s_vis[child] = 0;
+                            }
+                        }
+                    });
+                }
+            }
+            function _create_seq(x){
+                var ss = "";
+                var currnode = nodes[x]; 
+                var metaType = String(self.core.getMetaType(currnode).data.atr.name);
+                //console.log(self.core.getAttribute(currnode,'name'));
+                if(metaType.localeCompare("Terminate") == 0){
+                    ss+= terminate();
+                }
+                if(metaType.localeCompare("Invoke")==0){
+                    var inputVariable = self.core.getAttribute(currnode,"inputVariable");
+                    var name = self.core.getAttribute(currnode,"name");
+                    var operation = self.core.getAttribute(currnode,"operation");
+                    var outputVariable = self.core.getAttribute(currnode,"outputVariable");
+                    var partnerLink = self.core.getAttribute(currnode,"partnerLink");
+                    var portType = self.core.getAttribute(currnode,"portType");
+                    ss += invoke(partnerLink,portType,operation,inputVariable,outputVariable);
+                }
+                if(metaType.localeCompare("Receive")==0){
+                    var inputVariable = self.core.getAttribute(currnode,"inputVariable");
+                    var name = self.core.getAttribute(currnode,"name");
+                    var operation = self.core.getAttribute(currnode,"operation");
+                    var outputVariable = self.core.getAttribute(currnode,"outputVariable");
+                    var partnerLink = self.core.getAttribute(currnode,"partnerLink");
+                    var portType = self.core.getAttribute(currnode,"portType");
+                    ss += recive(partnerLink,portType,operation,inputVariable,outputVariable);
+                }
+                if(metaType.localeCompare("Assign")==0){
+                    var from = self.core.getAttribute(currnode,"from");
+                    var to = self.core.getAttribute(currnode,"to");
+                    ss += assign(from,to);
+                }
+                if(metaType.localeCompare("Switch") == 0){
+                    //console.log("jjj");
+                    var s_vis = {};
+                    Object.assign(s_vis,switch_vis);
+                    //console.log("jjj");
+                    //console.log(switch_vis)
+                    graph[x].forEach((child,i)=>{
+                        //console.log(child)
+                        switch_dfs(child,s_vis,i+1);
+                    });
+                    //console.log("jjj");
+                    //console.log(dic_switch_vis);
+                    dic_switch_vis[x] = s_vis;
+                    //console.log(dic_switch_vis);
+                    ss+= start_switch();
+                    m1++;
+                    //console.log("HHHHH");
+                    var pins = self.core.getChildrenPaths(currnode);
+                    //console.log("HHHHH");
+                    pins.forEach(element => {
+                        var name = String(self.core.getAttribute(nodes[element],'name'));
+                        if(name.localeCompare("Case") == 0){
+                            var cond = String(self.core.getAttribute(nodes[element],'condition'));
+                            //console.log(cond);
+                            
+                            ss+= _case_start(cond);
+                        }
+                    });
+                    
+                }     
+                return ss;  
+            }
+            
 
-                //console.log(graph);
-                graph[x].forEach((child, i) => {
-                    if(!vis[child]){
-                        var currnode = nodes[child]; 
-                        var metaType = String(self.core.getMetaType(currnode).data.atr.name);
-                        console.log(self.core.getAttribute(currnode,'name'));
-                        if(metaType.localeCompare("Invoke")==0){
-                            var inputVariable = self.core.getAttribute(currnode,"inputVariable");
-                            var name = self.core.getAttribute(currnode,"name");
-                            var operation = self.core.getAttribute(currnode,"operation");
-                            var outputVariable = self.core.getAttribute(currnode,"outputVariable");
-                            var partnerLink = self.core.getAttribute(currnode,"partnerLink");
-                            var portType = self.core.getAttribute(currnode,"portType");
-                            seq += invoke(partnerLink,portType,operation,inputVariable,outputVariable);
+            function dfs(x){
+                var ok1 = 0,ok2 = 0,okm3 = 0;
+                for( var key in dic_switch_vis){
+                    if((x in dic_switch_vis[key])){
+                        if(dic_switch_vis[key][x] == 1){
+                            ok1 =1;
                         }
-                        if(metaType.localeCompare("Assign")==0){
-                            var from = self.core.getAttribute(currnode,"from");
-                            var to = self.core.getAttribute(currnode,"to");
-                            seq += assign(from,to);
+                        if(dic_switch_vis[key][x] == 2){
+                            ok2 =1;
                         }
-                        if((child in graph)){
-                            dfs(child);
-                        }else{
-                            vis[child] = true;
+                        if(dic_switch_vis[key][x] == -1){
+                            seq += _case_close();
+                            seq+= start_otherwise();
+                            mark0(x,dic_switch_vis[key]);
+                            dic_switch_vis[key][x]  = -2;
+                            return;
+                        }
+                        if(dic_switch_vis[key][x] == -2){
+                            seq+= end_otherwise();
+                            seq+= end_switch();
+                            m1--;
+                            dic_switch_vis[key][x] = -3;
+                        }
+                        if(dic_switch_vis[key][x]== -3){
+                            okm3 = 1;
                         }
                     }
-                });
-            }
-            console.log(typeof(root));
-            console.log("HHHH");
-            dfs(root);
-            console.log("HHHH");
+                }
+                vis[x] = true;
+                seq+=_create_seq(x);
+                console.log(x);
+                for(var key in dic_switch_vis){
+                    console.log(dic_switch_vis[key]);
+                }
+                ////console.log(self.core.getAttribute(nodes[x],'name'));
+                ////console.log(vis);
+                ////console.log(graph);
 
-            //console.log(graph);
+                ////console.log(graph);
+                if((x in graph)){
+                    graph[x].forEach((child, i) => {
+                        if( !vis[child]  ){
+                            //if((child in graph)){
+                            dfs(child);
+                            
+                        }
+                    });
+                }else{
+                    //console.log(ok);
+                    if(ok1){
+                        seq += _case_close();
+                        seq+= start_otherwise();
+                    }
+                    if(ok2 || okm3){
+                        m1--;
+                        seq+= end_otherwise();
+                        seq+= end_switch();
+                    }
+                }
+            }
+            //console.log(typeof(root));
+            ////console.log("HHHH");
+            ////console.log(abc(12));
+            dfs(root);
+            ////console.log("HHHH");
+
+            ////console.log(graph);
             getVariables.forEach((val)=>{
                 _variable += variable(val,"");
             });
             plnks = parterner_links(plnks);
             _variable = variables(_variable);
+            console.log(m1);
+            while(m1>0){seq+=end_otherwise();seq += end_switch(); m1-=1;}
             seq = sequence(seq);
-            var code = process(self.core.getAttribute(nodeObject,"name"),"","",plnks+"\n"+_variable+"\n"+seq);
+            process()
+            var code = process(self.core.getAttribute(nodeObject,"name"),
+            self.core.getAttribute(nodeObject,"targetNamespace"),
+            self.core.getAttribute(nodeObject,"xmlns"),
+            plnks+"\n"+_variable+"\n"+seq,
+            self.core.getAttribute(nodeObject,"xmlns_var")
+            );
             console.log(code);
-            console.log("code");
+            //console.log("code");
 
         });
         
